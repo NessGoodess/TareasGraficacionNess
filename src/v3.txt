@@ -1,0 +1,171 @@
+export class CanvasLocal {
+  private graphics: CanvasRenderingContext2D;
+  private canvas: HTMLCanvasElement;
+  private text: string;
+  private size: number = 21; // Default QR code size
+  private qrMatrix: number[][] = Array(this.size).fill(null).map(() => Array(this.size).fill(0));
+
+  private isReserved(x: number, y: number): boolean {
+    // Placeholder implementation for reserved areas
+    const inTopLeftFinder = x < 7 && y < 7;
+    const inTopRightFinder = x >= this.size - 7 && y < 7;
+    const inBottomLeftFinder = x < 7 && y >= this.size - 7;
+    const isTimingLine = x === 6 || y === 6;
+    return inTopLeftFinder || inTopRightFinder || inBottomLeftFinder || isTimingLine;
+  }
+
+  constructor(graphics: CanvasRenderingContext2D, canvas: HTMLCanvasElement) {
+    this.graphics = graphics;
+    this.canvas = canvas;
+    this.text = "";
+  }
+
+  public setText(text: string): void {
+    this.text = text;
+  }
+  // Convierte texto en binario (ASCII → binario string)
+  private textToBinary(text: string): string {
+    return text.split("")
+      .map(char => char.charCodeAt(0).toString(2).padStart(8, "0"))
+      .join("");
+  }
+  private applyMask0(): void {
+    for (let y = 0; y < this.size; y++) {
+      for (let x = 0; x < this.size; x++) {
+        if (this.isReserved(x, y)) continue;
+  
+        if ((x + y) % 2 === 0) {
+          // Invertir bit
+          this.qrMatrix[y][x] ^= 1;
+        }
+      }
+    }
+  }
+
+// Insertar bits de formato codificados
+private drawFormatInfo(): void {
+  const formatBits = '111011111000100'; // Nivel M + Mask 0 codificado en BCH
+
+  const positions = [
+    // (fila, columna) – vertical izquierda
+    [0, 8], [1, 8], [2, 8], [3, 8], [4, 8], [5, 8], [7, 8], [8, 8],
+    // (fila, columna) – horizontal arriba
+    [8, 7], [8, 5], [8, 4], [8, 3], [8, 2], [8, 1], [8, 0],
+  ];
+
+  for (let i = 0; i < 15; i++) {
+    const [y, x] = positions[i];
+    const bit = parseInt(formatBits[i]);
+    this.qrMatrix[y][x] = bit;
+    this.drawModule(x, y, bit);
+  }
+
+  // Repetición del formato en esquina opuesta (parte inferior izquierda)
+  const mirrorPositions = [
+    [size - 1, 8], [size - 2, 8], [size - 3, 8], [size - 4, 8],
+    [size - 5, 8], [size - 6, 8], [size - 7, 8], [8, size - 8],
+    [8, size - 7], [8, size - 6], [8, size - 5], [8, size - 4],
+    [8, size - 3], [8, size - 2], [8, size - 1],
+  ];
+
+  for (let i = 0; i < 15; i++) {
+    const [y, x] = mirrorPositions[i];
+    const bit = parseInt(formatBits[i]);
+    this.qrMatrix[y][x] = bit;
+    this.drawModule(x, y, bit);
+  }
+}
+
+  public paint(): void {
+    // Limpia el canvas
+    this.graphics.fillStyle = "#ffffff";
+    this.graphics.fillRect(0, 0, this.canvas.width, this.canvas.height);
+
+    // Dimensiones básicas para QR versión 1 (21x21)
+    const size = 21;
+    const cellSize = Math.floor(Math.min(this.canvas.width, this.canvas.height) / size);
+    const qrMatrix = Array(size).fill(null).map(() => Array(size).fill(0));
+
+    const drawModule = (x: number, y: number, isBlack: number) => {
+      this.graphics.fillStyle = isBlack ? "#000000" : "#ffffff";
+      this.graphics.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
+    };
+
+    const drawFinder = (x: number, y: number) => {
+      const pattern = [
+        [1, 1, 1, 1, 1, 1, 1],
+        [1, 0, 0, 0, 0, 0, 1],
+        [1, 0, 1, 1, 1, 0, 1],
+        [1, 0, 1, 1, 1, 0, 1],
+        [1, 0, 1, 1, 1, 0, 1],
+        [1, 0, 0, 0, 0, 0, 1],
+        [1, 1, 1, 1, 1, 1, 1],
+      ];
+      for (let dy = 0; dy < 7; dy++) {
+        for (let dx = 0; dx < 7; dx++) {
+          const value = pattern[dy][dx];
+          qrMatrix[y + dy][x + dx] = value;
+          drawModule(x + dx, y + dy, value);
+        }
+      }
+    };
+    
+
+    // Dibujar los 3 buscadores
+    drawFinder(0, 0); // sup izq
+    drawFinder(size - 7, 0); // sup der
+    drawFinder(0, size - 7); // inf izq
+
+    // Dibujar líneas de temporización
+    for (let i = 8; i < size - 8; i++) {
+      const isBlack = i % 2 === 0;
+      qrMatrix[6][i] = isBlack ? 1 : 0;
+      qrMatrix[i][6] = isBlack ? 1 : 0;
+      drawModule(i, 6, isBlack ? 1 : 0);
+      drawModule(6, i, isBlack ? 1 : 0);
+    }
+    // Codificar texto como bits binarios
+    const binaryData = this.textToBinary(this.text);
+    console.log("Binary:", binaryData);
+
+    // Insertar los bits en la matriz QR desde abajo-derecha en zig-zag
+    let bitIndex = 0;
+
+    function isReserved(x: number, y: number): boolean {
+      // Evita sobrescribir buscadores, líneas de tiempo y bordes
+      const inTopLeftFinder = x < 7 && y < 7;
+      const inTopRightFinder = x >= size - 7 && y < 7;
+      const inBottomLeftFinder = x < 7 && y >= size - 7;
+      const isTimingLine = x === 6 || y === 6;
+      return inTopLeftFinder || inTopRightFinder || inBottomLeftFinder || isTimingLine;
+    }
+
+    // Barrido zig-zag desde la esquina inferior derecha hacia la izquierda
+    for (let col = size - 1; col > 0; col -= 2) {
+      if (col === 6) col--; // Saltar columna de sincronización
+
+      for (let rowOffset = 0; rowOffset < size; rowOffset++) {
+        const row = (col % 4 === 0) ? size - 1 - rowOffset : rowOffset;
+
+        for (let dx = 0; dx < 2; dx++) {
+          const x = col - dx;
+          const y = row;
+
+          if (x < 0 || y < 0 || x >= size || y >= size || isReserved(x, y)) continue;
+
+          const bit = binaryData[bitIndex++];
+          if (bit === undefined) return;
+
+          const isBlack = bit === "1";
+          qrMatrix[y][x] = isBlack ? 1 : 0;
+          drawModule(x, y, isBlack ? 1 : 0);
+        }
+      }
+    }
+    this.applyMask0();
+
+
+    // Mostrar en consola
+    console.table(qrMatrix);
+  }
+}
